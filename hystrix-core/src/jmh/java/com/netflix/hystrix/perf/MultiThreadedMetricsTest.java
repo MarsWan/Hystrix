@@ -20,113 +20,75 @@ import com.netflix.hystrix.HystrixCommandGroupKey;
 import com.netflix.hystrix.HystrixCommandMetrics;
 import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.hystrix.HystrixThreadPoolProperties;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.BenchmarkMode;
-import org.openjdk.jmh.annotations.Group;
-import org.openjdk.jmh.annotations.GroupThreads;
-import org.openjdk.jmh.annotations.Level;
-import org.openjdk.jmh.annotations.Mode;
-import org.openjdk.jmh.annotations.OutputTimeUnit;
-import org.openjdk.jmh.annotations.Param;
-import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.State;
-
-import java.util.concurrent.TimeUnit;
 
 public class MultiThreadedMetricsTest {
-    @State(Scope.Thread)
-    public static class CommandState {
-        HystrixCommand<Integer> command;
 
-        @Param({"THREAD", "SEMAPHORE"})
-        public HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy;
+	public static class CommandState {
+		HystrixCommand<Integer> command;
 
+		public HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy;
 
-        @Setup(Level.Invocation)
-        public void setUp() {
-            command = new HystrixCommand<Integer>(
-                    HystrixCommand.Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("PERF"))
-                            .andCommandPropertiesDefaults(
-                                    HystrixCommandProperties.Setter()
-                                            .withExecutionIsolationStrategy(isolationStrategy)
-                                            .withRequestCacheEnabled(true)
-                                            .withRequestLogEnabled(true)
-                                            .withCircuitBreakerEnabled(true)
-                                            .withCircuitBreakerForceOpen(false)
-                            )
-                            .andThreadPoolPropertiesDefaults(
-                                    HystrixThreadPoolProperties.Setter()
-                                            .withCoreSize(100)
-                            )
-            ) {
-                @Override
-                protected Integer run() throws Exception {
-                    return 1;
-                }
+		public void setUp() {
+			command = new HystrixCommand<Integer>(HystrixCommand.Setter
+					.withGroupKey(HystrixCommandGroupKey.Factory.asKey("PERF"))
+					.andCommandPropertiesDefaults(
+							HystrixCommandProperties
+									.Setter()
+									.withExecutionIsolationStrategy(
+											isolationStrategy)
+									.withRequestCacheEnabled(true)
+									.withRequestLogEnabled(true)
+									.withCircuitBreakerEnabled(true)
+									.withCircuitBreakerForceOpen(false))
+					.andThreadPoolPropertiesDefaults(
+							HystrixThreadPoolProperties.Setter().withCoreSize(
+									100))) {
+				@Override
+				protected Integer run() throws Exception {
+					return 1;
+				}
 
-                @Override
-                protected Integer getFallback() {
-                    return 2;
-                }
-            };
-        }
-    }
+				@Override
+				protected Integer getFallback() {
+					return 2;
+				}
+			};
+		}
+	}
 
-    @Benchmark
-    @Group("writeHeavy")
-    @GroupThreads(7)
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer writeHeavyCommandExecution(CommandState state) {
-        return state.command.observe().toBlocking().first();
-    }
+	public Integer writeHeavyCommandExecution(CommandState state) {
+		return state.command.observe().toBlocking().first();
+	}
 
-    @Benchmark
-    @Group("writeHeavy")
-    @GroupThreads(1)
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer writeHeavyReadMetrics(CommandState state) {
-        HystrixCommandMetrics metrics = state.command.getMetrics();
-        return metrics.getExecutionTimeMean() + metrics.getExecutionTimePercentile(50) + metrics.getExecutionTimePercentile(75) + metrics.getExecutionTimePercentile(99);
-    }
+	public Integer writeHeavyReadMetrics(CommandState state) {
+		HystrixCommandMetrics metrics = state.command.getMetrics();
+		return metrics.getExecutionTimeMean()
+				+ metrics.getExecutionTimePercentile(50)
+				+ metrics.getExecutionTimePercentile(75)
+				+ metrics.getExecutionTimePercentile(99);
+	}
 
-    @Benchmark
-    @Group("evenSplit")
-    @GroupThreads(4)
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer evenSplitOfWritesAndReadsCommandExecution(CommandState state) {
-        return state.command.observe().toBlocking().first();
-    }
+	public Integer evenSplitOfWritesAndReadsCommandExecution(CommandState state) {
+		return state.command.observe().toBlocking().first();
+	}
 
-    @Benchmark
-    @Group("evenSplit")
-    @GroupThreads(4)
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer evenSplitOfWritesAndReadsReadMetrics(CommandState state) {
-        HystrixCommandMetrics metrics = state.command.getMetrics();
-        return metrics.getExecutionTimeMean() + metrics.getExecutionTimePercentile(50) + metrics.getExecutionTimePercentile(75) + metrics.getExecutionTimePercentile(99);
-    }
+	public Integer evenSplitOfWritesAndReadsReadMetrics(CommandState state) {
+		HystrixCommandMetrics metrics = state.command.getMetrics();
+		return metrics.getExecutionTimeMean()
+				+ metrics.getExecutionTimePercentile(50)
+				+ metrics.getExecutionTimePercentile(75)
+				+ metrics.getExecutionTimePercentile(99);
+	}
 
-    @Benchmark
-    @Group("readHeavy")
-    @GroupThreads(1)
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer readHeavyCommandExecution(CommandState state) {
-        return state.command.observe().toBlocking().first();
-    }
+	public Integer readHeavyCommandExecution(CommandState state) {
+		return state.command.observe().toBlocking().first();
+	}
 
-    @Benchmark
-    @Group("readHeavy")
-    @GroupThreads(7)
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer readHeavyReadMetrics(CommandState state) {
-        HystrixCommandMetrics metrics = state.command.getMetrics();
-        return metrics.getExecutionTimeMean() + metrics.getExecutionTimePercentile(50) + metrics.getExecutionTimePercentile(75) + metrics.getExecutionTimePercentile(99);
-    }
+	public Integer readHeavyReadMetrics(CommandState state) {
+		HystrixCommandMetrics metrics = state.command.getMetrics();
+		return metrics.getExecutionTimeMean()
+				+ metrics.getExecutionTimePercentile(50)
+				+ metrics.getExecutionTimePercentile(75)
+				+ metrics.getExecutionTimePercentile(99);
+	}
 }

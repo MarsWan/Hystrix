@@ -15,198 +15,153 @@
  */
 package com.netflix.hystrix.perf;
 
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import rx.Observable;
+import rx.schedulers.Schedulers;
+
 import com.netflix.hystrix.HystrixCommand;
 import com.netflix.hystrix.HystrixCommandGroupKey;
 import com.netflix.hystrix.HystrixCommandProperties;
 import com.netflix.hystrix.HystrixThreadPool;
 import com.netflix.hystrix.HystrixThreadPoolKey;
 import com.netflix.hystrix.HystrixThreadPoolProperties;
-import org.openjdk.jmh.annotations.Benchmark;
-import org.openjdk.jmh.annotations.BenchmarkMode;
-import org.openjdk.jmh.annotations.Level;
-import org.openjdk.jmh.annotations.Mode;
-import org.openjdk.jmh.annotations.OutputTimeUnit;
-import org.openjdk.jmh.annotations.Param;
-import org.openjdk.jmh.annotations.Scope;
-import org.openjdk.jmh.annotations.Setup;
-import org.openjdk.jmh.annotations.State;
-import org.openjdk.jmh.annotations.TearDown;
-import rx.Observable;
-import rx.schedulers.Schedulers;
-
-import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 public class CommandSetterExecutionPerfTest {
 
-    @State(Scope.Thread)
-    public static class CommandState {
-        HystrixCommand<Integer> command;
+	public static class CommandState {
+		HystrixCommand<Integer> command;
 
-        @Param({"true", "false"})
-        public boolean forceCircuitOpen;
+		public boolean forceCircuitOpen;
 
-        @Param({"THREAD", "SEMAPHORE"})
-        public HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy;
+		public HystrixCommandProperties.ExecutionIsolationStrategy isolationStrategy;
 
+		public void setUp() {
+			command = new HystrixCommand<Integer>(HystrixCommand.Setter
+					.withGroupKey(HystrixCommandGroupKey.Factory.asKey("PERF"))
+					.andCommandPropertiesDefaults(
+							HystrixCommandProperties
+									.Setter()
+									.withExecutionIsolationStrategy(
+											isolationStrategy)
+									.withRequestCacheEnabled(true)
+									.withRequestLogEnabled(true)
+									.withCircuitBreakerEnabled(true)
+									.withCircuitBreakerForceOpen(
+											forceCircuitOpen))
+					.andThreadPoolPropertiesDefaults(
+							HystrixThreadPoolProperties.Setter().withCoreSize(
+									100))) {
+				@Override
+				protected Integer run() throws Exception {
+					return 1;
+				}
 
-        @Setup(Level.Invocation)
-        public void setUp() {
-            command = new HystrixCommand<Integer>(
-                    HystrixCommand.Setter.withGroupKey(HystrixCommandGroupKey.Factory.asKey("PERF"))
-                            .andCommandPropertiesDefaults(
-                                    HystrixCommandProperties.Setter()
-                                            .withExecutionIsolationStrategy(isolationStrategy)
-                                            .withRequestCacheEnabled(true)
-                                            .withRequestLogEnabled(true)
-                                            .withCircuitBreakerEnabled(true)
-                                            .withCircuitBreakerForceOpen(forceCircuitOpen)
-                            )
-                            .andThreadPoolPropertiesDefaults(
-                                    HystrixThreadPoolProperties.Setter()
-                                            .withCoreSize(100)
-                            )
-            ) {
-                @Override
-                protected Integer run() throws Exception {
-                    return 1;
-                }
+				@Override
+				protected Integer getFallback() {
+					return 2;
+				}
+			};
+		}
+	}
 
-                @Override
-                protected Integer getFallback() {
-                    return 2;
-                }
-            };
-        }
-    }
+	public static class ExecutorState {
+		ExecutorService executorService;
 
-    @State(Scope.Benchmark)
-    public static class ExecutorState {
-        ExecutorService executorService;
+		public void setUp() {
+			executorService = Executors.newFixedThreadPool(100);
+		}
 
-        @Setup
-        public void setUp() {
-            executorService = Executors.newFixedThreadPool(100);
-        }
+		public void tearDown() {
+			List<Runnable> runnables = executorService.shutdownNow();
+		}
+	}
 
-        @TearDown
-        public void tearDown() {
-            List<Runnable> runnables = executorService.shutdownNow();
-        }
-    }
+	public static class ThreadPoolState {
+		HystrixThreadPool hystrixThreadPool;
 
-    @State(Scope.Benchmark)
-    public static class ThreadPoolState {
-        HystrixThreadPool hystrixThreadPool;
+		public void setUp() {
+			hystrixThreadPool = new HystrixThreadPool.HystrixThreadPoolDefault(
+					HystrixThreadPoolKey.Factory.asKey("PERF"),
+					HystrixThreadPoolProperties.Setter().withCoreSize(100));
+		}
 
-        @Setup
-        public void setUp() {
-            hystrixThreadPool = new HystrixThreadPool.HystrixThreadPoolDefault(
-                    HystrixThreadPoolKey.Factory.asKey("PERF")
-                    , HystrixThreadPoolProperties.Setter().withCoreSize(100));
-        }
+		public void tearDown() {
+			hystrixThreadPool.getExecutor().shutdownNow();
+		}
+	}
 
-        @TearDown
-        public void tearDown() {
-            hystrixThreadPool.getExecutor().shutdownNow();
-        }
-    }
+	public Integer baselineExecute() {
+		return 1;
+	}
 
+	public Integer baselineQueue(ExecutorState state)
+			throws InterruptedException, ExecutionException {
+		try {
+			return state.executorService.submit(new Callable<Integer>() {
+				@Override
+				public Integer call() throws Exception {
+					return 1;
+				}
+			}).get();
+		} catch (Throwable t) {
+			return 2;
+		}
+	}
 
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer baselineExecute() {
-        return 1;
-    }
+	public Integer baselineSyncObserve() throws InterruptedException {
+		Observable<Integer> syncObservable = Observable.just(1);
 
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer baselineQueue(ExecutorState state) throws InterruptedException, ExecutionException{
-        try {
-            return state.executorService.submit(new Callable<Integer>() {
-                @Override
-                public Integer call() throws Exception {
-                    return 1;
-                }
-            }).get();
-        } catch (Throwable t) {
-            return 2;
-        }
-    }
+		try {
+			return syncObservable.toBlocking().first();
+		} catch (Throwable t) {
+			return 2;
+		}
+	}
 
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer baselineSyncObserve() throws InterruptedException {
-        Observable<Integer> syncObservable = Observable.just(1);
+	public Integer baselineAsyncComputationObserve()
+			throws InterruptedException {
+		Observable<Integer> asyncObservable = Observable.just(1).subscribeOn(
+				Schedulers.computation());
 
-        try {
-            return syncObservable.toBlocking().first();
-        } catch (Throwable t) {
-            return 2;
-        }
-    }
+		try {
+			return asyncObservable.toBlocking().first();
+		} catch (Throwable t) {
+			return 2;
+		}
+	}
 
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer baselineAsyncComputationObserve() throws InterruptedException {
-        Observable<Integer> asyncObservable = Observable.just(1).subscribeOn(Schedulers.computation());
+	public Integer baselineAsyncCustomThreadPoolObserve(ThreadPoolState state) {
+		Observable<Integer> asyncObservable = Observable.just(1).subscribeOn(
+				state.hystrixThreadPool.getScheduler());
+		try {
+			return asyncObservable.toBlocking().first();
+		} catch (Throwable t) {
+			return 2;
+		}
+	}
 
-        try {
-            return asyncObservable.toBlocking().first();
-        } catch (Throwable t) {
-            return 2;
-        }
-    }
+	public Integer hystrixExecute(CommandState state) {
+		return state.command.execute();
+	}
 
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer baselineAsyncCustomThreadPoolObserve(ThreadPoolState state) {
-        Observable<Integer> asyncObservable = Observable.just(1).subscribeOn(state.hystrixThreadPool.getScheduler());
-        try {
-            return asyncObservable.toBlocking().first();
-        } catch (Throwable t) {
-            return 2;
-        }
-    }
+	public Integer hystrixQueue(CommandState state) {
+		try {
+			return state.command.queue().get();
+		} catch (Throwable t) {
+			return 2;
+		}
+	}
 
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer hystrixExecute(CommandState state) {
-        return state.command.execute();
-    }
+	public Integer hystrixObserve(CommandState state) {
+		return state.command.observe().toBlocking().first();
+	}
 
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer hystrixQueue(CommandState state) {
-        try {
-            return state.command.queue().get();
-        } catch (Throwable t) {
-            return 2;
-        }
-    }
-
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer hystrixObserve(CommandState state) {
-        return state.command.observe().toBlocking().first();
-    }
-
-    @Benchmark
-    @BenchmarkMode({Mode.Throughput})
-    @OutputTimeUnit(TimeUnit.MILLISECONDS)
-    public Integer hystrixToObservable(CommandState state) {
-        return state.command.toObservable().toBlocking().first();
-    }
+	public Integer hystrixToObservable(CommandState state) {
+		return state.command.toObservable().toBlocking().first();
+	}
 }
